@@ -16,13 +16,14 @@
 | ⚙️ AstrBot 4.x 兼容 | 修复悬空 import（旧版 faiss_store 残留引用）、web_api `Response` 接口变更（双版本兼容层）、`MilvusStore` 缺少 `_ensured_rerank` 初始化 |
 | 🐛 faiss 断链 | 修复依赖注入时序（`user_prefs_handler` 提前到初始化前）、`_get_collection_meta` 元组解包数量 |
 | ⚙️ 新增配置 | `allowed_local_dirs` 本地路径白名单（逗号分隔） |
+| ✅ 市场审核整改 | 通过 AstrBot 官方市场 LLM Guard 审核意见整改：`logger` 统一从 `astrbot.api` 导入；知识库内容改用 `req.extra_user_content_parts` 注入（`TextPart.mark_as_temp()` 临时标记，不再改写 prompt/system_prompt/历史上下文，保护缓存命中）；Milvus 全部网络 I/O 异步化（`asyncio.to_thread`，消除同步阻塞） |
 
 ## 📜 版本历史
 
 | 版本 | 说明 |
 |---|---|
 | v0.5.9 | 原作者 lxfight 最后版本（2025-10-27） |
-| **v0.6.0** | **修复维护版（YangPengWei666）**：安全加固 + AstrBot 4.x 兼容 + faiss 断链修复 |
+| **v0.6.0** | **修复维护版（YangPengWei666）**：安全加固 + AstrBot 4.x 兼容 + faiss 断链修复 + 市场审核整改（规范注入/日志/异步 I/O） |
 
 ---
 

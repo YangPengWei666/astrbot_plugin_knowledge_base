@@ -117,7 +117,8 @@ class MilvusStore(VectorDBBase):
                         )
                     break
 
-            connections.connect(
+            await asyncio.to_thread(
+                connections.connect,
                 alias=self.alias,
                 host=self.host,
                 port=self.port,
@@ -157,7 +158,7 @@ class MilvusStore(VectorDBBase):
         if self._is_connected:
             # 可以选择性地ping一下服务器确认连接仍然有效
             try:
-                utility.get_server_version(using=self.alias)
+                await asyncio.to_thread(utility.get_server_version, using=self.alias)
                 logger.info(
                     f"已连接到远程 Milvus 服务: {self.host}:{self.port} (alias: {self.alias})"
                 )
@@ -231,10 +232,10 @@ class MilvusStore(VectorDBBase):
         collection_name = collection.name
         try:
             has_embedding_index = False
-            if collection.has_index(
-                index_name=""
+            if await asyncio.to_thread(
+                collection.has_index, index_name=""
             ):  # 检查默认索引或任何embedding字段的索引
-                indexes = collection.indexes
+                indexes = await asyncio.to_thread(lambda: collection.indexes)
                 for idx_obj in indexes:
                     if idx_obj.field_name == "embedding":
                         has_embedding_index = True
@@ -257,20 +258,24 @@ class MilvusStore(VectorDBBase):
                     },
                     using=self.alias,
                 )
-                collection.create_index(
-                    field_name="embedding", index_params=index_obj.params
+                await asyncio.to_thread(
+                    collection.create_index,
+                    field_name="embedding",
+                    index_params=index_obj.params,
                 )
                 logger.info(
                     f"为集合 '{collection_name}' 的 'embedding' 字段创建索引 {self.index_type} 成功 (通过 Index 对象)。"
                 )
 
             # --- 加载逻辑 ---
-            if collection.is_empty:
+            if await asyncio.to_thread(lambda: collection.is_empty):
                 logger.info(f"远程 Milvus 集合 '{collection_name}' 为空，无需加载。")
                 return
 
             logger.info(f"检查集合 '{collection_name}' 的加载状态...")
-            initial_load_state = utility.load_state(collection_name, using=self.alias)
+            initial_load_state = await asyncio.to_thread(
+                utility.load_state, collection_name, using=self.alias
+            )
             logger.info(f"集合 '{collection_name}' 当前加载状态: {initial_load_state}")
 
             is_loaded = False
@@ -284,10 +289,7 @@ class MilvusStore(VectorDBBase):
                     f"集合 '{collection_name}' 未加载或加载未完成。尝试调用 load()..."
                 )
                 try:
-                    collection.load(
-                        # replica_number=1,
-                        # timeout=self.kwargs.get("load_timeout", None)
-                    )
+                    await asyncio.to_thread(collection.load)
                     logger.info(
                         f"已为集合 '{collection_name}' 调用 load()。等待加载完成..."
                     )
@@ -295,7 +297,8 @@ class MilvusStore(VectorDBBase):
                     # 等待加载完成
                     try:
                         if hasattr(utility, "wait_for_loading_complete"):
-                            utility.wait_for_loading_complete(
+                            await asyncio.to_thread(
+                                utility.wait_for_loading_complete,
                                 collection_name,
                                 using=self.alias,
                                 timeout=self.kwargs.get("load_wait_timeout", 60),
@@ -312,8 +315,10 @@ class MilvusStore(VectorDBBase):
                             )  # 从 kwargs 获取
                             for i in range(max_wait_loops):
                                 await asyncio.sleep(loop_delay)
-                                current_state_obj = utility.load_state(
-                                    collection_name, using=self.alias
+                                current_state_obj = await asyncio.to_thread(
+                                    utility.load_state,
+                                    collection_name,
+                                    using=self.alias,
                                 )
                                 logger.info(
                                     f"等待加载... 集合 '{collection_name}' 状态: {current_state_obj} (尝试 {i + 1}/{max_wait_loops})"
@@ -333,8 +338,8 @@ class MilvusStore(VectorDBBase):
                             f"等待集合 '{collection_name}' 加载完成时出错: {e_wait}。继续执行..."
                         )
 
-                    final_load_state_obj = utility.load_state(
-                        collection_name, using=self.alias
+                    final_load_state_obj = await asyncio.to_thread(
+                        utility.load_state, collection_name, using=self.alias
                     )
                     final_is_loaded = False
                     if LoadState:
@@ -459,7 +464,9 @@ class MilvusStore(VectorDBBase):
                 return False  # 如果仍未连接
 
         try:
-            return utility.has_collection(collection_name, using=self.alias)
+            return await asyncio.to_thread(
+                utility.has_collection, collection_name, using=self.alias
+            )
         except Exception as e:
             if (
                 "not connected" in str(e).lower()
@@ -799,7 +806,8 @@ class MilvusStore(VectorDBBase):
             # fields_to_request = None # 让 Milvus 返回默认字段 (ID和distance/score)
 
         try:
-            results = collection.search(
+            results = await asyncio.to_thread(
+                collection.search,
                 data=[query_embedding],
                 anns_field="embedding",
                 param=search_params,
@@ -881,7 +889,9 @@ class MilvusStore(VectorDBBase):
             )
             return False
         try:
-            utility.drop_collection(collection_name, using=self.alias)
+            await asyncio.to_thread(
+                utility.drop_collection, collection_name, using=self.alias
+            )
             logger.info(
                 f"远程 Milvus 集合 '{collection_name}' (alias: {self.alias}) 已删除。"
             )
@@ -908,7 +918,9 @@ class MilvusStore(VectorDBBase):
                 return []
 
         try:
-            return utility.list_collections(using=self.alias)
+            return await asyncio.to_thread(
+                utility.list_collections, using=self.alias
+            )
         except Exception as e:
             if (
                 "not connected" in str(e).lower()
@@ -943,14 +955,15 @@ class MilvusStore(VectorDBBase):
             # Milvus 2.2.x 之后，collection.num_entities 是推荐的
             # 它可能需要集合先被加载 (collection.load() 之后)
             # collection.flush() # 可能影响 num_entities 的准确性，确保数据已提交
-            stats = collection.num_entities
+            stats = await asyncio.to_thread(lambda: collection.num_entities)
             return stats
         except Exception as e_stats:
             logger.warning(
                 f"获取集合 '{collection_name}' (alias: {self.alias}) 文档数 (num_entities) 失败: {e_stats}。尝试 query count(*)..."
             )
             try:
-                res = collection.query(
+                res = await asyncio.to_thread(
+                    collection.query,
                     expr="",  # 或者 "pk != ''" 如果主键可能为空字符串
                     output_fields=["count(*)"],
                     consistency_level=self.consistency_level_str,
@@ -961,7 +974,8 @@ class MilvusStore(VectorDBBase):
                     logger.warning(
                         f"count(*) for collection '{collection_name}' (alias: {self.alias}) returned unexpected: {res}. Querying all pks..."
                     )
-                    all_pks_res = collection.query(
+                    all_pks_res = await asyncio.to_thread(
+                        collection.query,
                         expr="",
                         output_fields=["pk"],  # 假设主键字段名为 'pk'
                         consistency_level=self.consistency_level_str,

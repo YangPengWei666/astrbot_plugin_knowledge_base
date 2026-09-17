@@ -28,6 +28,8 @@ class KBConfig:
     # RAG 配置
     search_top_k: int = 3
     min_similarity_score: float = 0.5
+    # 已废弃（v0.6.0 市场审核整改后统一走 req.extra_user_content_parts 注入）：
+    # 保留字段仅为兼容旧配置文件，不再影响注入行为。
     insertion_method: str = "prepend_prompt"
     context_template: str = "这是相关的知识库信息，请参考这些信息来回答用户的问题：\n{retrieved_contexts}"
     max_insert_length: int = 200000

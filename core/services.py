@@ -4,10 +4,10 @@ from typing import List, Tuple, Optional, TYPE_CHECKING
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.provider import ProviderRequest
+from astrbot.core.agent.message import TextPart
 from .constants import (
     KB_START_MARKER,
     KB_END_MARKER,
-    USER_PROMPT_DELIMITER_IN_HISTORY,
     QUERY_LOG_LENGTH,
     CONTENT_PREVIEW_LENGTH,
     PROMPT_PREVIEW_LENGTH,
@@ -132,81 +132,6 @@ class RAGService:
         self.metadata_repo = metadata_repo
         self.config_manager = config_manager
 
-    def clean_kb_content_from_contexts(self, req: ProviderRequest) -> None:
-        """
-        清理历史对话中的知识库内容
-
-        Args:
-            req: LLM 请求对象,会直接修改其 contexts 属性
-        """
-        if not req.contexts:
-            return
-
-        cleaned_contexts = []
-        initial_count = len(req.contexts)
-
-        for message in req.contexts:
-            role = message.get("role")
-            content = message.get("content", "")
-
-            # 处理 system 消息
-            if role == "system" and KB_START_MARKER in content:
-                log_debug(
-                    "清理历史对话",
-                    {"action": "删除知识库 system 消息", "content_preview": content[:CONTENT_PREVIEW_LENGTH]}
-                )
-                continue
-
-            # 处理 user 消息
-            elif role == "user" and KB_START_MARKER in content:
-                start_idx = content.find(KB_START_MARKER)
-                end_idx = content.find(KB_END_MARKER, start_idx)
-
-                if start_idx != -1 and end_idx != -1:
-                    delimiter_idx = content.find(
-                        USER_PROMPT_DELIMITER_IN_HISTORY,
-                        end_idx + len(KB_END_MARKER),
-                    )
-
-                    if delimiter_idx != -1:
-                        # 提取原始用户问题
-                        original_prompt = content[
-                            delimiter_idx + len(USER_PROMPT_DELIMITER_IN_HISTORY) :
-                        ].strip()
-                        message["content"] = original_prompt
-                        cleaned_contexts.append(message)
-                        log_debug(
-                            "清理历史对话",
-                            {"action": "从 user 消息中清理知识库内容", "原问题": original_prompt[:CONTENT_PREVIEW_LENGTH]}
-                        )
-                    else:
-                        log_warning(
-                            "清理历史对话",
-                            "缺少原始问题分隔符",
-                            details={"content_preview": content[:CONTENT_PREVIEW_LENGTH]}
-                        )
-                        continue
-                else:
-                    log_warning(
-                        "清理历史对话",
-                        "缺少知识库结束标记",
-                        details={"content_preview": content[:CONTENT_PREVIEW_LENGTH]}
-                    )
-                    continue
-            else:
-                # 其他消息保持不变
-                cleaned_contexts.append(message)
-
-        req.contexts = cleaned_contexts
-        removed_count = initial_count - len(req.contexts)
-
-        if removed_count > 0:
-            log_success(
-                "清理历史对话",
-                result=f"删除了 {removed_count} 条知识库补充消息",
-                details={"初始数量": initial_count, "清理后": len(req.contexts)}
-            )
-
     async def enhance_request(
         self,
         event: AstrMessageEvent,
@@ -312,57 +237,24 @@ class RAGService:
             f"{KB_START_MARKER}\n{knowledge_to_insert}\n{KB_END_MARKER}"
         )
 
-        # 根据配置插入内容
-        insertion_method = user_config.insertion_method
-
-        if insertion_method == "system_prompt":
-            if req.system_prompt:
-                req.system_prompt = f"{knowledge_to_insert}\n\n{req.system_prompt}"
-            else:
-                req.system_prompt = knowledge_to_insert
-            log_success(
-                "知识库内容注入",
-                "system_prompt",
-                details={
-                    "最终长度": len(req.system_prompt),
-                    "知识库部分": len(knowledge_to_insert)
-                }
-            )
-
-        elif insertion_method == "prepend_prompt":
-            original_prompt = req.prompt
-            req.prompt = (
-                f"{knowledge_to_insert}\n\n"
-                f"{USER_PROMPT_DELIMITER_IN_HISTORY}{req.prompt}"
-            )
-            log_success(
-                "知识库内容注入",
-                "prepend_prompt",
-                details={
-                    "原始长度": len(original_prompt),
-                    "知识库长度": len(knowledge_to_insert),
-                    "最终长度": len(req.prompt)
-                }
-            )
-
-        else:
-            log_warning(
-                "知识库内容注入",
-                f"未知插入方式: {insertion_method},使用默认方式",
-                details={"默认方式": "prepend_prompt"}
-            )
-            req.prompt = (
-                f"{knowledge_to_insert}\n\n"
-                f"{USER_PROMPT_DELIMITER_IN_HISTORY}{req.prompt}"
-            )
+        # 通过 extra_user_content_parts 注入检索内容（AstrBot 官方推荐方式，
+        # 与内置知识库功能 astr_main_agent.py 同款写法）：
+        # 不修改 req.prompt / req.system_prompt / req.contexts，避免破坏 prompt 缓存命中率。
+        # mark_as_temp() 标记为临时内容，仅本次请求对 provider 可见，不写入会话历史。
+        req.extra_user_content_parts.append(
+            TextPart(text=knowledge_to_insert).mark_as_temp()
+        )
+        log_success(
+            "知识库内容注入",
+            "extra_user_content_parts",
+            details={
+                "知识库内容长度": len(knowledge_to_insert),
+                "注入位置": "用户消息末尾（临时，不持久化）",
+            }
+        )
 
         # 记录修改后的内容（用于调试）
         log_debug(
             "LLM 请求内容",
-            {"prompt_preview": req.prompt[:PROMPT_PREVIEW_LENGTH]}
+            {"extra_user_content_parts_count": len(req.extra_user_content_parts)}
         )
-        if req.system_prompt:
-            log_debug(
-                "LLM 请求内容",
-                {"system_prompt_preview": req.system_prompt[:PROMPT_PREVIEW_LENGTH]}
-            )

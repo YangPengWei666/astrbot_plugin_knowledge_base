@@ -28,7 +28,7 @@ except ImportError:
 from .utils.text_splitter import TextSplitterUtil
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from .utils.file_parser import FileParser, LLM_Config
-from astrbot import logger
+from astrbot.api import logger
 from astrbot.api import AstrBotConfig
 from astrbot.core.config.default import VERSION
 from .core.user_prefs_handler import UserPrefsHandler

@@ -28,9 +28,6 @@ async def enhance_request_with_kb(
         rag_service: RAG 服务实例
         user_prefs_handler: 用户偏好处理器
     """
-    # 清理历史对话中的知识库内容
-    rag_service.clean_kb_content_from_contexts(req)
-
     # 获取默认知识库
     default_collection_name = user_prefs_handler.get_user_default_collection(event)
 

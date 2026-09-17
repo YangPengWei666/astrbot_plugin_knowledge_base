@@ -6,9 +6,6 @@ PLUGIN_REGISTER_NAME = "astrbot_plugin_knowledge_base"
 KB_START_MARKER = "###KBDATA_START###"
 KB_END_MARKER = "###KBDATA_END###"
 
-# 用于 'prepend_prompt' 方式时，在用户原始问题前添加的标记
-USER_PROMPT_DELIMITER_IN_HISTORY = "\n\n用户的原始问题是：\n"
-
 # 文件下载相关常量
 ALLOWED_FILE_EXTENSIONS = [
     ".txt",
