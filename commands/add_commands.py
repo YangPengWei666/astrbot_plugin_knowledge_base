@@ -7,6 +7,11 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from ..vector_store.base import Document
 from ..utils import file_utils
+from ..utils.security import (
+    check_url_safety,
+    validate_local_path,
+    get_allowed_local_roots,
+)
 from ..core.constants import ALLOWED_FILE_EXTENSIONS
 
 if TYPE_CHECKING:
@@ -122,6 +127,12 @@ async def handle_add_file(
         is_url = False
 
     if is_url:
+        # SSRF 防护：入口校验（download_file 内部还会对每跳重定向再次校验）
+        safe, reason = check_url_safety(path_or_url)
+        if not safe:
+            logger.warning(f"URL 安全检查未通过: {reason}。URL: {path_or_url}")
+            yield event.plain_result(f"URL 安全检查未通过，已阻止: {reason}")
+            return
         yield event.plain_result(f"检测到 URL，正在尝试下载: {path_or_url} ...")
         temp_download_dir = os.path.join(
             plugin.persistent_data_root_path, "temp_downloads"
@@ -140,21 +151,36 @@ async def handle_add_file(
             return
     else:
         logger.info(f"用户提供了本地路径: {path_or_url}。将检查是文件还是文件夹。")
-        if not os.path.exists(path_or_url):
-            yield event.plain_result(f"本地路径无效或不存在: {path_or_url}")
+        # 路径穿越防护：仅允许知识库数据目录（及配置白名单）内的路径
+        allowed_roots = get_allowed_local_roots(
+            plugin.persistent_data_root_path,
+            plugin.config.get("allowed_local_dirs", ""),
+        )
+        path_allowed, resolved_path = validate_local_path(path_or_url, allowed_roots)
+        if not path_allowed:
+            logger.warning(
+                f"本地路径安全检查未通过: {resolved_path}。路径: {path_or_url}"
+            )
+            yield event.plain_result(
+                f"路径安全检查未通过，已阻止: {resolved_path}。"
+                f"本地路径仅允许在插件数据目录（或配置的 allowed_local_dirs 白名单）内。"
+            )
+            return
+        if not os.path.exists(resolved_path):
+            yield event.plain_result(f"本地路径无效或不存在: {resolved_path}")
             return
 
-        if os.path.isfile(path_or_url):
+        if os.path.isfile(resolved_path):
             files_to_process_info.append(
-                (path_or_url, os.path.basename(path_or_url), False)
+                (resolved_path, os.path.basename(resolved_path), False)
             )
-        elif os.path.isdir(path_or_url):
+        elif os.path.isdir(resolved_path):
             yield event.plain_result(
-                f"检测到文件夹路径，正在遍历支持的文件: {path_or_url} ..."
+                f"检测到文件夹路径，正在遍历支持的文件: {resolved_path} ..."
             )
             supported_extensions = tuple(ALLOWED_FILE_EXTENSIONS)
             found_files_count = 0
-            for root, _, files in os.walk(path_or_url):
+            for root, _, files in os.walk(resolved_path):
                 for filename in files:
                     if filename.lower().endswith(supported_extensions):
                         full_path = os.path.join(root, filename)
@@ -162,14 +188,14 @@ async def handle_add_file(
                         found_files_count += 1
             if not files_to_process_info:
                 yield event.plain_result(
-                    f"在文件夹 '{path_or_url}' 中未找到支持的文件类型 ({', '.join(supported_extensions)})。"
+                    f"在文件夹 '{resolved_path}' 中未找到支持的文件类型 ({', '.join(supported_extensions)})。"
                 )
                 return
             yield event.plain_result(
                 f"在文件夹中找到 {found_files_count} 个支持的文件，将开始处理。"
             )
         else:
-            yield event.plain_result(f"路径 '{path_or_url}' 不是有效的文件或文件夹。")
+            yield event.plain_result(f"路径 '{resolved_path}' 不是有效的文件或文件夹。")
             return
 
     if not files_to_process_info:
