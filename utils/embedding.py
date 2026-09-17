@@ -242,6 +242,8 @@ class EmbeddingSolutionHelper:
         self.curr_embedding_util = curr_embedding_util
         self.context = context
         self._metadata_repo = metadata_repo
+        # 用户偏好处理器（兼容旧版 FaissStore 直接访问方式，由 main.py 在 vector_db.initialize() 前注入）
+        self.user_prefs_handler = None
 
     def set_metadata_repo(self, metadata_repo: CollectionMetadataRepository) -> None:
         """延迟注入元数据仓库
@@ -251,6 +253,15 @@ class EmbeddingSolutionHelper:
         """
         self._metadata_repo = metadata_repo
         logger.debug("元数据仓库已成功注入到 EmbeddingSolutionHelper")
+
+    def set_user_prefs_handler(self, user_prefs_handler) -> None:
+        """注入用户偏好处理器（须在 vector_db.initialize() 之前调用）
+
+        FaissStore 初始化扫描磁盘时（_get_collection_meta）即会访问
+        embedding_util.user_prefs_handler，注入太晚会导致有历史数据时初始化崩溃。
+        """
+        self.user_prefs_handler = user_prefs_handler
+        logger.debug("UserPrefsHandler 已成功注入到 EmbeddingSolutionHelper")
 
     @property
     def metadata_repo(self) -> CollectionMetadataRepository:

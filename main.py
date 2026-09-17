@@ -140,6 +140,15 @@ class KnowledgeBasePlugin(Star):
                 )
             logger.info("Embedding 工具初始化完成（metadata_repo 将在稍后注入）。")
 
+            # ⚠️ 提前注入 UserPrefsHandler：必须在 vector_db.initialize() 之前完成。
+            # FaissStore 初始化扫描历史数据时（_scan_collections_on_disk → _get_collection_meta）
+            # 即访问 embedding_util.user_prefs_handler，注入太晚会导致有历史数据时初始化崩溃。
+            if self.embedding_util and self.user_prefs_handler:
+                self.embedding_util.set_user_prefs_handler(self.user_prefs_handler)
+                logger.debug(
+                    "UserPrefsHandler 已提前注入到 EmbeddingSolutionHelper（vector_db.initialize 之前）"
+                )
+
             # Text Splitter
             kb_config = self.config_manager.kb_config
             self.text_splitter = TextSplitterUtil(

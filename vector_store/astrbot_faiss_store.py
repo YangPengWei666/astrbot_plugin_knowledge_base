@@ -276,7 +276,7 @@ class FaissStore(VectorDBBase):
 
             logger.info(f"缓存未命中，准备加载集合: '{collection_name}'")
 
-            _, _, index_path, storage_path, _ = self._get_collection_meta(
+            _, _, index_path, storage_path = self._get_collection_meta(
                 collection_name
             )
 
