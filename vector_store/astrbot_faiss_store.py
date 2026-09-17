@@ -20,7 +20,6 @@ from astrbot.api import logger
 from astrbot.core.db.vec_db.faiss_impl import FaissVecDB
 from astrbot.core.provider.provider import EmbeddingProvider
 from ..utils.embedding import EmbeddingSolutionHelper
-from .faiss_store import FaissStore as OldFaissStore
 
 # 定义默认的缓存大小
 DEFAULT_MAX_CACHE_SIZE = 3
@@ -114,8 +113,6 @@ class FaissStore(VectorDBBase):
         )
         # ------------------------
 
-        self._old_faiss_store: Optional[OldFaissStore] = None
-        self._old_collections: Dict[str, str] = {}  # 记录所有旧格式的集合
         self.embedding_utils: Dict[str, AstrBotEmbeddingProviderWrapper] = {}
         os.makedirs(self.data_path, exist_ok=True)
 
@@ -125,7 +122,7 @@ class FaissStore(VectorDBBase):
         # 初始化时只扫描，不加载
         await self._scan_collections_on_disk()
         logger.info(
-            f"Faiss 存储扫描完成。发现新格式集合: {list(self._all_known_collections)}，旧格式集合: {list(self._old_collections.keys())}"
+            f"Faiss 存储扫描完成。发现集合: {list(self._all_known_collections)}"
         )
 
     def _get_collection_meta(self, collection_name: str) -> Tuple[str, str, str, str]:
@@ -157,26 +154,22 @@ class FaissStore(VectorDBBase):
 
         index_path = os.path.join(self.data_path, f"{file_id}.index")
         storage_path = os.path.join(self.data_path, f"{file_id}.db")
-        _old_storage_path = os.path.join(self.data_path, f"{file_id}.docs")
         return (
             final_collection_name,
             file_id,
             index_path,
             storage_path,
-            _old_storage_path,
         )
 
     async def _scan_collections_on_disk(self):
-        """扫描磁盘目录，识别新旧集合，填充 _all_known_collections 和 _old_collections"""
+        """扫描磁盘目录，填充 _all_known_collections"""
         self._all_known_collections.clear()
-        self._old_collections.clear()
         if not os.path.exists(self.data_path):
             return
 
         scanned_file_ids = set()
-        # 优先处理 .index 和 .db 文件
         all_files = os.listdir(self.data_path)
-        relevant_extensions = (".index", ".db", ".docs")
+        relevant_extensions = (".index", ".db")
 
         for filename in all_files:
             if not filename.endswith(relevant_extensions):
@@ -187,41 +180,11 @@ class FaissStore(VectorDBBase):
                 continue
 
             file_id = base
-            collection_name, _, index_path, storage_path, _old_storage_path = (
-                self._get_collection_meta(file_id)
-            )
-
-            is_old = False
-            # 检查是否为旧格式
-            if _check_pickle_file(storage_path) or os.path.exists(_old_storage_path):
-                is_old = True
-            # 如果 .index 和 .db 都存在，认为是新格式 (除非 .db 是pickle 或存在 .docs)
-            elif os.path.exists(index_path) and os.path.exists(storage_path):
-                is_old = False
-            # 如果只有 .docs，认为是旧格式
-            elif ext == ".docs" and not os.path.exists(index_path):
-                is_old = True
-            else:
-                # 其他情况，例如只有 .index 或只有 .db (非pickle)，暂时跳过或认为是新格式不完整
-                # 为简单起见，如果存在 index 和 db 之一且非旧格式，就认为是新格式
-                if ext in (".index", ".db"):
-                    is_old = False
-                else:
-                    continue  # 忽略不明确的文件
+            collection_name, _, _, _ = self._get_collection_meta(file_id)
 
             scanned_file_ids.add(file_id)
-            if is_old:
-                self._old_collections[collection_name] = collection_name
-                logger.debug(f"发现旧格式集合: {collection_name} (file_id: {file_id})")
-            else:
-                self._all_known_collections.add(collection_name)
-                logger.debug(f"发现新格式集合: {collection_name} (file_id: {file_id})")
-
-        # 如果发现了旧集合，初始化旧存储实例
-        if self._old_collections and not self._old_faiss_store:
-            logger.info("发现旧格式集合，初始化 OldFaissStore...")
-            self._old_faiss_store = OldFaissStore(self.embedding_util, self.data_path)
-            await self._old_faiss_store.initialize()
+            self._all_known_collections.add(collection_name)
+            logger.debug(f"发现集合: {collection_name} (file_id: {file_id})")
 
     async def _perform_load(
         self, collection_name: str, index_path: str, storage_path: str
@@ -298,9 +261,7 @@ class FaissStore(VectorDBBase):
         5. 加载集合
         6. 放入缓存
         """
-        # 1. 旧集合或已在缓存中，直接返回
-        if collection_name in self._old_collections:
-            return None
+        # 1. 已在缓存中，直接返回
         if collection_name in self.cache:
             # 访问即更新其在 LRU 中的位置
             return self.cache[collection_name]
@@ -379,12 +340,9 @@ class FaissStore(VectorDBBase):
             logger.error(f"Faiss 集合 '{collection_name}' 创建或加载失败。")
 
     async def collection_exists(self, collection_name: str) -> bool:
-        """检查集合是否存在于磁盘（新格式）或旧存储中"""
-        # 检查已知的（扫描到的或创建的）新格式集合，以及旧格式集合
-        return (
-            collection_name in self._all_known_collections
-            or collection_name in self._old_collections
-        )
+        """检查集合是否存在于磁盘"""
+        # 检查已知的（扫描到的或创建的）集合
+        return collection_name in self._all_known_collections
 
     async def _batch_process_task(
         self,
@@ -454,19 +412,7 @@ class FaissStore(VectorDBBase):
         内存风险：整个 `documents` 列表会一次性加载到内存中。对于非常大的数据集，
         调用者应考虑分块调用此方法。
         """
-        # 首先处理旧集合
-        if collection_name in self._old_collections:
-            if self._old_faiss_store:
-                return await self._old_faiss_store.add_documents(
-                    collection_name, documents
-                )
-            else:
-                logger.error(
-                    f"旧集合 '{collection_name}' 存在但 OldFaissStore 未初始化。"
-                )
-                return []
-
-        # 如果集合不存在（既不是旧的，也不在_all_known_collections），则创建它
+        # 如果集合不存在，则创建它
         # create_collection 内部会调用 _get_or_load_vecdb(..., for_create=True)
         if not await self.collection_exists(collection_name):
             logger.warning(f"Faiss 集合 '{collection_name}' 不存在。将尝试自动创建。")
@@ -562,18 +508,6 @@ class FaissStore(VectorDBBase):
             logger.warning(f"Faiss 集合 '{collection_name}' 不存在。")
             return []
 
-        # 首先处理旧集合
-        if collection_name in self._old_collections:
-            if self._old_faiss_store:
-                return await self._old_faiss_store.search(
-                    collection_name, query_text, top_k
-                )
-            else:
-                logger.error(
-                    f"旧集合 '{collection_name}' 存在但 OldFaissStore 未初始化。"
-                )
-                return []
-
         # 获取或加载集合实例
         vecdb = await self._get_or_load_vecdb(collection_name)
         if not vecdb:
@@ -621,13 +555,6 @@ class FaissStore(VectorDBBase):
             logger.info(f"Faiss 集合 '{collection_name}' 不存在，无需删除。")
             return False
 
-        # 首先处理旧集合
-        if collection_name in self._old_collections:
-            self._old_collections.pop(collection_name, None)
-            if self._old_faiss_store:
-                return await self._old_faiss_store.delete_collection(collection_name)
-            return False
-
         # 如果集合在缓存中，先卸载并关闭它
         await self._unload_collection(collection_name)
         # 从已知集合列表中移除
@@ -635,8 +562,7 @@ class FaissStore(VectorDBBase):
 
         # 保持文件删除在线程中执行
         def _delete_sync():
-            # self.vecdbs.pop(collection_name, None) # 改为 _unload_collection
-            _, file_id, index_path, storage_path, _ = self._get_collection_meta(
+            _, file_id, index_path, storage_path = self._get_collection_meta(
                 collection_name
             )
 
@@ -656,20 +582,14 @@ class FaissStore(VectorDBBase):
         return await asyncio.to_thread(_delete_sync)
 
     async def list_collections(self) -> List[str]:
-        """列出所有已知的集合（包括缓存中的、磁盘上未加载的、旧格式的）"""
+        """列出所有已知的集合（包括缓存中的、磁盘上未加载的）"""
         # 重新扫描可能更准确，但为了效率，依赖初始化扫描和创建/删除时的维护
         # await self._scan_collections_on_disk()
-        return list(self._all_known_collections) + list(self._old_collections.keys())
+        return list(self._all_known_collections)
 
     async def count_documents(self, collection_name: str) -> int:
         if not await self.collection_exists(collection_name):
             return 0
-        # 首先处理旧集合
-        if collection_name in self._old_collections:
-            if self._old_faiss_store:
-                return await self._old_faiss_store.count_documents(collection_name)
-            else:
-                return 0
 
         # 获取或加载集合实例
         vecdb = await self._get_or_load_vecdb(collection_name)
@@ -684,7 +604,7 @@ class FaissStore(VectorDBBase):
             return 0
 
     async def close(self):
-        """关闭所有缓存中的集合和旧存储"""
+        """关闭所有缓存中的集合"""
         logger.info(f"正在关闭所有已加载的 Faiss 集合 (缓存大小: {len(self.cache)})...")
         # 复制 key 列表，因为 _unload_collection 会修改 self.cache
         try:
@@ -697,13 +617,6 @@ class FaissStore(VectorDBBase):
             self._locks.clear()
             self._all_known_collections.clear()
             logger.info("所有缓存中的 Faiss 集合已关闭和清理。")
-
-            if self._old_faiss_store:
-                logger.info("正在关闭 OldFaissStore...")
-                await self._old_faiss_store.close()
-                self._old_faiss_store = None
-                self._old_collections.clear()
-                logger.info("OldFaissStore 已关闭。")
 
             # 强制垃圾回收
             gc.collect()

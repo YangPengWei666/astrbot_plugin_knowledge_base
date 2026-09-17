@@ -4,7 +4,27 @@ import uuid
 from astrbot.api.star import Context
 from .vector_store.base import VectorDBBase, Document
 from quart import request
-from astrbot.dashboard.server import Response
+try:
+    # AstrBot >= 4.0：responses 模块级函数
+    from astrbot.dashboard.responses import ok as _resp_ok, error as _resp_error
+
+    def _resp_ok_compat(data=None, message=None):
+        return _resp_ok(data=data, message=message)
+
+    def _resp_error_compat(message: str, data=None):
+        return _resp_error(message, data=data)
+except ImportError:
+    # AstrBot 3.5.x：Response 类（.ok()/.error() 返回对象， 转 dict）
+    try:
+        from astrbot.dashboard.routes.route import Response as _LegacyResponse
+    except ImportError:
+        from astrbot.dashboard.server import Response as _LegacyResponse
+
+    def _resp_ok_compat(data=None, message=None):
+        return _Legacy_resp_ok_compat(data=data, message=message)
+
+    def _resp_error_compat(message: str, data=None):
+        return _Legacy_resp_error_compat(message)
 from .utils.text_splitter import TextSplitterUtil
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from .utils.file_parser import FileParser, LLM_Config
@@ -86,11 +106,11 @@ class KnowledgeBaseWebAPI:
         description = data.get("description", "")
         embedding_provider_id = data.get("embedding_provider_id", None)
         if not collection_name:
-            return Response().error("缺少集合名称").__dict__
+            return _resp_error_compat("缺少集合名称")
         if await self.vec_db.collection_exists(collection_name):
-            return Response().error("集合已存在").__dict__
+            return _resp_error_compat("集合已存在")
         if not embedding_provider_id:
-            return Response().error("缺少嵌入提供商 ID").__dict__
+            return _resp_error_compat("缺少嵌入提供商 ID")
         try:
             # 添加集合元数据
             metadata = {
@@ -125,12 +145,12 @@ class KnowledgeBaseWebAPI:
                     "collection_metadata"
                 ] = collection_metadata
                 await self.user_prefs_handler.save_user_preferences()
-                return Response().error(str(e)).__dict__
+                return _resp_error_compat(str(e))
 
             await self.vec_db.create_collection(collection_name)
-            return Response().ok(message="集合创建成功").__dict__
+            return _resp_ok_compat(message="集合创建成功")
         except Exception as e:
-            return Response().error(f"创建集合失败: {str(e)}").__dict__
+            return _resp_error_compat(f"创建集合失败: {str(e)}")
 
     async def list_collections(self):
         """
@@ -158,9 +178,9 @@ class KnowledgeBaseWebAPI:
                 result.append(
                     {"collection_name": collection, "count": count, **collection_md}
                 )
-            return Response().ok(data=result).__dict__
+            return _resp_ok_compat(data=result)
         except Exception as e:
-            return Response().error(f"获取集合列表失败: {str(e)}").__dict__
+            return _resp_error_compat(f"获取集合列表失败: {str(e)}")
 
     async def add_documents(self):
         """
@@ -174,9 +194,9 @@ class KnowledgeBaseWebAPI:
         chunk_size = (await request.form).get("chunk_size", None)
         overlap = (await request.form).get("chunk_overlap", None)
         if not upload_file or not collection_name:
-            return Response().error("缺少知识库名称").__dict__
+            return _resp_error_compat("缺少知识库名称")
         if not await self.vec_db.collection_exists(collection_name):
-            return Response().error("目标知识库不存在").__dict__
+            return _resp_error_compat("目标知识库不存在")
 
         try:
             chunk_size = int(chunk_size) if chunk_size else None
@@ -216,13 +236,9 @@ class KnowledgeBaseWebAPI:
                 )
                 if not doc_ids:
                     raise Exception("添加文档失败，返回的文档 ID 为空")
-                return (
-                    Response()
-                    .ok(
-                        data=doc_ids,
-                        message=f"成功从文件 '{upload_file.filename}' 添加 {len(doc_ids)} 条知识到 '{collection_name}'。",
-                    )
-                    .__dict__
+                return _resp_ok_compat(
+                    data=doc_ids,
+                    message=f"成功从文件 '{upload_file.filename}' 添加 {len(doc_ids)} 条知识到 '{collection_name}'。",
                 )
             except Exception as e:
                 raise Exception(f"添加文档失败: {str(e)}。")
@@ -231,7 +247,7 @@ class KnowledgeBaseWebAPI:
             logger.error(f"添加文档失败: {str(e)}")
             if os.path.exists(path):
                 os.remove(path)
-            return Response().error(f"添加文档失败: {str(e)}").__dict__
+            return _resp_error_compat(f"添加文档失败: {str(e)}")
 
     async def search_documents(self):
         """
@@ -251,11 +267,11 @@ class KnowledgeBaseWebAPI:
 
         # 验证必要参数
         if not collection_name or not query:
-            return Response().error("缺少集合名称或查询字符串").__dict__
+            return _resp_error_compat("缺少集合名称或查询字符串")
 
         # 检查知识库是否存在
         if not await self.vec_db.collection_exists(collection_name):
-            return Response().error("目标知识库不存在").__dict__
+            return _resp_error_compat("目标知识库不存在")
 
         try:
             # 执行搜索
@@ -273,10 +289,10 @@ class KnowledgeBaseWebAPI:
                         "score": score,
                     }
                 )
-            return Response().ok(data=formatted_results).__dict__
+            return _resp_ok_compat(data=formatted_results)
         except Exception as e:
             logger.error(f"搜索失败: {str(e)}")
-            return Response().error(f"搜索失败: {str(e)}").__dict__
+            return _resp_error_compat(f"搜索失败: {str(e)}")
 
     async def delete_collection(self):
         """
@@ -288,12 +304,12 @@ class KnowledgeBaseWebAPI:
 
         # 检查知识库是否存在
         if not await self.vec_db.collection_exists(collection_name):
-            return Response().error("目标知识库不存在").__dict__
+            return _resp_error_compat("目标知识库不存在")
 
         try:
             # 执行删除
             await self.vec_db.delete_collection(collection_name)
-            return Response().ok(f"删除 {collection_name} 成功").__dict__
+            return _resp_ok_compat(f"删除 {collection_name} 成功")
         except Exception as e:
             logger.error(f"删除失败: {str(e)}")
-            return Response().error(f"删除失败: {str(e)}").__dict__
+            return _resp_error_compat(f"删除失败: {str(e)}")
