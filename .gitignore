@@ -172,3 +172,6 @@ cython_debug/
 
 .spec-workflow/
 CLAUDE.md
+
+# AstrBot runtime data (test imports)
+data/

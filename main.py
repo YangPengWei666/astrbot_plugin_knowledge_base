@@ -50,10 +50,10 @@ from .commands import (
 
 @register(
     constants.PLUGIN_REGISTER_NAME,
-    "lxfight",
-    "一个支持多种向量数据库的知识库插件",
-    "0.5.4",
-    "https://github.com/lxfight/astrbot_plugin_knowledge_base",
+    "lxfight（原作者）· YangPengWei666（修复维护）",
+    "一个支持多种向量数据库的知识库插件（修复维护版：安全加固 + AstrBot4 兼容）",
+    "0.6.0",
+    "https://github.com/YangPengWei666/astrbot_plugin_knowledge_base",
 )
 class KnowledgeBasePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):

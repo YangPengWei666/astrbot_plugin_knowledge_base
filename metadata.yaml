@@ -1,6 +1,27 @@
 name: astrbot_plugin_knowledge_base
-desc: 为AstrBot实现了一个简单的知识库,实现在对话过程中补充额外的知识
+display_name: 知识库（修复维护版）
+short_desc: 对话知识库增强，修复安全漏洞 + AstrBot4 兼容
+desc: |-
+  为 AstrBot 实现了一个简单的知识库，实现在对话过程中补充额外的知识。
+
+  **本仓库为修复维护版**：原插件由 lxfight 开发（[原仓库](https://github.com/lxfight/astrbot_plugin_knowledge_base)）。因原作者停止维护且插件曾因安全问题被官方下架，由 YangPengWei666 接手修复维护。
+
+  **修复内容（v0.6.0）**：
+  - 安全加固：修复官方下架漏洞——路径穿越 + SSRF 双重校验（utils/security.py）
+  - AstrBot 4.x 兼容：修复悬空 import、web_api Response 接口变更、MilvusStore 初始化缺失
+  - faiss 断链修复：依赖注入时序提前 + 元组解包数量修正
+  - 新增配置：allowed_local_dirs 本地路径白名单
 help: 输入 /kb help 查看指令帮助
-version: v0.5.9
-author: lxfight
-repo: https://github.com/lxfight/astrbot_plugin_knowledge_base
+version: 0.6.0
+author: lxfight（原作者）· YangPengWei666（修复维护）
+repo: https://github.com/YangPengWei666/astrbot_plugin_knowledge_base
+astrbot_version: ">=3.5.13"
+support_platforms:
+  - telegram
+  - qq
+  - wechat
+tags:
+  - 知识库
+  - RAG
+  - 向量检索
+  - AI

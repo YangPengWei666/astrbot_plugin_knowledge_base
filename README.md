@@ -1,3 +1,31 @@
+<div align="center">
+
+## 🛡️ 维护者声明
+
+原插件由 **lxfight** 开发（[原仓库](https://github.com/lxfight/astrbot_plugin_knowledge_base)），因原作者停止维护且插件曾因安全问题被官方下架，现由 **YangPengWei666** 接手修复维护。
+
+</div>
+
+---
+
+## 🔧 修复内容（v0.6.0）
+
+| 类别 | 修复项 |
+|---|---|
+| 🛡️ 安全加固 | 修复官方下架漏洞：**路径穿越 + SSRF** 双重校验（新增 `utils/security.py`，URL 仅允许公网 http/https、本地路径限定数据目录/白名单） |
+| ⚙️ AstrBot 4.x 兼容 | 修复悬空 import（旧版 faiss_store 残留引用）、web_api `Response` 接口变更（双版本兼容层）、`MilvusStore` 缺少 `_ensured_rerank` 初始化 |
+| 🐛 faiss 断链 | 修复依赖注入时序（`user_prefs_handler` 提前到初始化前）、`_get_collection_meta` 元组解包数量 |
+| ⚙️ 新增配置 | `allowed_local_dirs` 本地路径白名单（逗号分隔） |
+
+## 📜 版本历史
+
+| 版本 | 说明 |
+|---|---|
+| v0.5.9 | 原作者 lxfight 最后版本（2025-10-27） |
+| **v0.6.0** | **修复维护版（YangPengWei666）**：安全加固 + AstrBot 4.x 兼容 + faiss 断链修复 |
+
+---
+
 <h1 align="center">🚀 AstrBot 知识库插件 🚀</h1>
 
 <p align="center">
