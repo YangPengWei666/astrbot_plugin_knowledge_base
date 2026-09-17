@@ -90,6 +90,8 @@ class MilvusStore(VectorDBBase):
         self.kwargs = kwargs  # 存储 kwargs 以便后续使用，例如 auto_create_collection
 
         self._is_connected = False
+        # lazy load rerank 标记（与 MilvusLiteStore 保持一致，修复 AttributeError，对应 issue #64）
+        self._ensured_rerank = False
 
     async def _attempt_connect(self):
         """尝试连接到 Milvus 服务。"""
